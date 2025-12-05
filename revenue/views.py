@@ -2,6 +2,11 @@ import pandas as pd
 from rest_framework.response import Response
 from rest_framework.decorators import api_view
 from .models import Transaction
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.views import APIView
+from rest_framework import status
+from rest_framework import generics
+from .serializers import TransactionSerializer
 
 @api_view(['GET'])
 def revenue_forecast(request):
@@ -32,3 +37,70 @@ def revenue_forecast(request):
         "forecast_next_7_days": forecast
     })
 
+
+
+
+class UploadCSVView(APIView):
+    parser_classes = (MultiPartParser, FormParser)
+
+    def post(self, request, *args, **kwargs):
+        file = request.FILES.get('file')
+
+        if not file:
+            return Response({"error": "No file uploaded."}, status=400)
+
+        try:
+            df = pd.read_csv(file)
+
+            # require columns
+            if 'amount' not in df.columns or 'timestamp' not in df.columns:
+                return Response({
+                    "error": "CSV must contain 'amount' and 'timestamp' columns."
+                }, status=400)
+
+            # save each row
+            for _, row in df.iterrows():
+                Transaction.objects.create(
+                    amount=row['amount'],
+                    timestamp=row['timestamp']
+                )
+
+            return Response({"message": "CSV uploaded and data saved."})
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+        
+
+class TransactionListView(generics.ListAPIView):
+    queryset = Transaction.objects.all().order_by('-timestamp')
+    serializer_class = TransactionSerializer
+
+
+
+
+from django.shortcuts import render
+from .models import Transaction
+import pandas as pd
+
+def upload_csv_template(request):
+    message = error = None
+
+    if request.method == 'POST':
+        file = request.FILES.get('file')
+        if not file:
+            error = "No file selected."
+        else:
+            try:
+                df = pd.read_csv(file)
+                if 'amount' not in df.columns or 'timestamp' not in df.columns:
+                    error = "CSV must contain 'amount' and 'timestamp' columns."
+                else:
+                    for _, row in df.iterrows():
+                        Transaction.objects.create(
+                            amount=row['amount'],
+                            timestamp=row['timestamp']
+                        )
+                    message = "CSV uploaded and saved successfully!"
+            except Exception as e:
+                error = str(e)
+
+    return render(request, 'revenue/upload.html', {"message": message, "error": error})
